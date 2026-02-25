@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+dist/
+build/
+*.spec
+.vscode/
+.idea/
+*.png
+!chest_template.png
