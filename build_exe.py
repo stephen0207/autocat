@@ -12,19 +12,16 @@ def build():
         print("PyInstaller not found. Installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
-    # Path to main script and resources
+    # Path to main script
     main_script = "auto_loot.py"
-    res_name = "chest_template.png"
     
     # Build command
     # --onefile: single exe
-    # --add-data: include the template (Windows uses ; as separator)
-    # --uac-admin: request admin privileges on launch
+    # --add-data: bundle the chest template inside the exe
     cmd = [
         "pyinstaller",
         "--onefile",
-        "--add-data", f"{res_name};.",
-        "--uac-admin",
+        "--add-data", "chest_template.png;.",
         "--name", "AutoLoot",
         main_script
     ]

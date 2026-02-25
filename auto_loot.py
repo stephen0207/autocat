@@ -53,14 +53,76 @@ def is_admin():
         return False
 
 
+def is_process_elevated(pid: int) -> bool:
+    """
+    Return True if the process with the given PID is running with
+    elevated (admin) privileges.
+    """
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    TOKEN_QUERY = 0x0008
+
+    try:
+        h_process = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not h_process:
+            return False
+
+        h_token = ctypes.wintypes.HANDLE()
+        if not ctypes.windll.advapi32.OpenProcessToken(
+            h_process, TOKEN_QUERY, ctypes.byref(h_token)
+        ):
+            ctypes.windll.kernel32.CloseHandle(h_process)
+            return False
+
+        # TokenElevation = 20
+        elevation = ctypes.wintypes.DWORD()
+        size = ctypes.wintypes.DWORD()
+        ctypes.windll.advapi32.GetTokenInformation(
+            h_token, 20,
+            ctypes.byref(elevation), ctypes.sizeof(elevation),
+            ctypes.byref(size)
+        )
+        ctypes.windll.kernel32.CloseHandle(h_token)
+        ctypes.windll.kernel32.CloseHandle(h_process)
+        return bool(elevation.value)
+    except Exception:
+        return False
+
+
+def resource_path(relative_path):
+    """
+    Return path to a resource file.
+    - First checks PyInstaller's temp extraction dir (_MEIPASS) for bundled files.
+    - Falls back to the folder containing the EXE (frozen) or script (dev).
+    """
+    if getattr(sys, 'frozen', False):
+        # Check bundled resources first
+        bundled = os.path.join(sys._MEIPASS, relative_path)
+        if os.path.exists(bundled):
+            return bundled
+        # Fall back to folder next to the EXE
+        return os.path.join(os.path.dirname(sys.executable), relative_path)
+    else:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+
 def elevate():
+    """
+    Re-launch the current process with admin privileges.
+    Called only when Bongo Cat is detected as running as admin.
+    """
     if not is_admin():
-        print("  🔒 Requesting admin privileges...")
-        # Use absolute path and -u for unbuffered output
-        script = os.path.abspath(sys.argv[0])
-        args = "-u " + " ".join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
+        print("  🔒 Bongo Cat is running as admin — requesting admin privileges...")
+        if getattr(sys, 'frozen', False):
+            script = sys.executable
+            args = None
+        else:
+            script = sys.executable
+            args = "-u " + " ".join([f'"{os.path.abspath(sys.argv[0])}"'] +
+                                    [f'"{a}"' for a in sys.argv[1:]])
         ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, args, None, 1
+            None, "runas", script, args, None, 1
         )
         sys.exit(0)
 
@@ -555,21 +617,33 @@ class BongoCatAutoLooter:
 
 
 def main():
-    elevate()
-    disable_quick_edit()  # Prevent console freezes from cursor movement — must run before any prints
-    # Flush stdout/stderr immediately after disabling Quick Edit
+    disable_quick_edit()  # Prevent console freezes from cursor movement
     sys.stdout.flush()
     sys.stderr.flush()
 
-    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    template_path = os.path.join(script_dir, "chest_template.png")
+    template_path = resource_path("chest_template.png")
 
     print()
     print("=" * 55)
     print("  🐱 Bongo Cat Auto-Loot")
     print("=" * 55)
-    # print(f"  🔑 Admin: {is_admin()}")
-    # print(f"  📂 Dir: {script_dir}")
+
+    # ── Check if Bongo Cat runs as admin; elevate only if needed ─
+    import win32process
+    results = []
+    def _enum_cb(hwnd, data):
+        if win32gui.IsWindowVisible(hwnd) and WINDOW_TITLE.lower() in win32gui.GetWindowText(hwnd).lower():
+            data.append(hwnd)
+    win32gui.EnumWindows(_enum_cb, results)
+
+    if results:
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(results[0])
+            if is_process_elevated(pid) and not is_admin():
+                elevate()  # re-launch with admin and exit current process
+        except Exception as e:
+            print(f"  ⚠️  Could not check Bongo Cat elevation: {e}")
+    # ────────────────────────────────────────────────────────────
 
     looter = BongoCatAutoLooter(template_path)
     looter.run()
