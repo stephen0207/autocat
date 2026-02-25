@@ -113,7 +113,7 @@ def elevate():
     Called only when Bongo Cat is detected as running as admin.
     """
     if not is_admin():
-        print("  🔒 Bongo Cat is running as admin — requesting admin privileges...")
+        print("  🔒 Elevating to admin...")
         if getattr(sys, 'frozen', False):
             script = sys.executable
             args = None
@@ -145,7 +145,7 @@ def disable_quick_edit():
         # Keep ENABLE_EXTENDED_FLAGS (0x0080) so the change takes effect
         new_mode = (mode.value & ~0x0040 & ~0x0020) | 0x0080
         kernel32.SetConsoleMode(h_stdin, new_mode)
-        print("  ✅ Quick Edit mode disabled (prevents accidental freezes)")
+        print("  ✅ Quick Edit disabled")
     except Exception as e:
         print(f"  ⚠️  Could not disable Quick Edit: {e}")
 
@@ -194,7 +194,6 @@ class BongoCatAutoLooter:
     def _load_template(self, template_path: str):
         if not os.path.exists(template_path):
             print(f"  ❌ Template not found: {template_path}")
-            print("     Run capture_chest.py first to create the template.")
             sys.exit(1)
 
         self.template = cv2.imread(template_path, cv2.IMREAD_COLOR)
@@ -203,7 +202,7 @@ class BongoCatAutoLooter:
             sys.exit(1)
 
         self.template_h, self.template_w = self.template.shape[:2]
-        print(f"  ✅ Template: {self.template_w}x{self.template_h} px")
+        print(f"  ✅ Template loaded ({self.template_w}x{self.template_h}px)")
 
     def _find_window(self):
         def enum_cb(hwnd, results):
@@ -220,10 +219,7 @@ class BongoCatAutoLooter:
             sys.exit(1)
 
         self.hwnd = results[0][0]
-        rect = win32gui.GetWindowRect(self.hwnd)
-        print(f"  🪟 Found: \"{results[0][1]}\"")
-        print(f"     Screen position: left={rect[0]} top={rect[1]} "
-              f"right={rect[2]} bottom={rect[3]}")
+        print(f"  🪟 Window: \"{results[0][1]}\"")
 
     def _check_hotkeys(self):
         """Poll physical key state — no console input interaction."""
@@ -246,7 +242,7 @@ class BongoCatAutoLooter:
     def _toggle_pause(self):
         self.paused = not self.paused
         status = "⏸️  PAUSED" if self.paused else "▶️  RESUMED"
-        print(f"\n{status} (press F6 to toggle)")
+        print(f"  {status}")
 
     def _stop(self):
         self.running = False
@@ -256,9 +252,8 @@ class BongoCatAutoLooter:
     def _toggle_keep_alive(self):
         self.keep_alive = not self.keep_alive
         self._apply_keep_alive()
-        status = "🔆 Keep Alive ON" if self.keep_alive else "🌙 Keep Alive OFF"
-        detail = "(display + system stay awake)" if self.keep_alive else "(display may turn off)"
-        print(f"\n{status} {detail} — press F8 to toggle")
+        status = "🔆 ON" if self.keep_alive else "🌙 OFF"
+        print(f"  Keep Alive: {status}")
 
     def _apply_keep_alive(self):
         """Apply or remove the keep-alive execution state."""
@@ -523,22 +518,11 @@ class BongoCatAutoLooter:
             print(f"  ⚠️  Click error: {e}", flush=True)
 
     def run(self):
-        print()
-        print("=" * 55)
-        print("  🐱 Bongo Cat Auto-Loot")
-        print("=" * 55)
-        print()
-        print(f"  ⚠️  Keep Bongo Cat window open (can be behind other windows)")
-        print(f"  💡 Monitor can be turned off — script will keep working")
-        print()
-        print(f"  📋 Check every {CHECK_INTERVAL}s | "
-              f"Confidence ≥ {CONFIDENCE_THRESHOLD} | "
-              f"Cooldown {POST_CLICK_COOLDOWN}s")
         alive_status = "ON" if self.keep_alive else "OFF"
-        print(f"  ⌨️  F6=Pause/Resume | F7=Stop | F8=Keep Alive ({alive_status})")
-        print()
-        print("-" * 55)
-        print(f"  📊 Chests: 0 | 👀 Scanning...", flush=True)
+        print(f"  ⌨️  F6=Pause | F7=Stop | F8=KeepAlive({alive_status})")
+        print(f"  📋 Interval={CHECK_INTERVAL}s  Confidence≥{CONFIDENCE_THRESHOLD}  Cooldown={POST_CLICK_COOLDOWN}s")
+        print("-" * 50)
+        print(f"  👀 Scanning...", flush=True)
 
         # Apply keep-alive state (prevents display + system sleep)
         self._apply_keep_alive()
@@ -574,24 +558,16 @@ class BongoCatAutoLooter:
                         self.last_loot_time = now
                         ts = datetime.now().strftime("%H:%M:%S")
 
-                        print(
-                            f"  [{ts}] 📦 Chest #{self.loot_count}! "
-                            f"offset=({x},{y}) conf={confidence:.2%}",
-                            flush=True
-                        )
-
-                        self.click_chest(x, y)
-
                         elapsed = int(time.time() - start_time)
                         mins, secs = divmod(elapsed, 60)
                         hrs, mins = divmod(mins, 60)
                         print(
-                            f"  [{ts}] ✅ Clicked! "
-                            f"Total: {self.loot_count} | "
-                            f"⏱️ {hrs:02d}:{mins:02d}:{secs:02d} | "
-                            f"Next check in {POST_CLICK_COOLDOWN}s...",
+                            f"  [{ts}] 📦 #{self.loot_count} "
+                            f"({confidence:.0%}) ⏱️{hrs:02d}:{mins:02d}:{secs:02d}",
                             flush=True
                         )
+
+                        self.click_chest(x, y)
                         self._sleep(POST_CLICK_COOLDOWN)
                 else:
                     self._sleep(CHECK_INTERVAL)
@@ -606,13 +582,8 @@ class BongoCatAutoLooter:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
             hrs, mins = divmod(mins, 60)
-            print()
-            print("=" * 55)
-            print(f"  📊 Session Summary")
-            print(f"     Chests looted : {self.loot_count}")
-            print(f"     Total time    : {hrs:02d}:{mins:02d}:{secs:02d}")
-            print("=" * 55)
-            print()
+            print("-" * 50)
+            print(f"  📊 Done — {self.loot_count} chests in {hrs:02d}:{mins:02d}:{secs:02d}")
             input("  Press Enter to exit...")
 
 
@@ -623,10 +594,8 @@ def main():
 
     template_path = resource_path("chest_template.png")
 
-    print()
-    print("=" * 55)
-    print("  🐱 Bongo Cat Auto-Loot")
-    print("=" * 55)
+    print("\n  🐱 Bongo Cat Auto-Loot")
+    print("=" * 50)
 
     # ── Check if Bongo Cat runs as admin; elevate only if needed ─
     import win32process
