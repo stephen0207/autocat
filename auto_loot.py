@@ -427,14 +427,6 @@ class BongoCatAutoLooter:
 
             ctypes.windll.user32.AllowSetForegroundWindow(-1)
 
-            # Alt+Tab to force-minimize fullscreen app
-            ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)
-            ctypes.windll.user32.keybd_event(VK_TAB, 0, 0, 0)
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, 0)
-            ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.3)
-
             # Force BongoCat to front
             ctypes.windll.user32.SetWindowPos(
                 self.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -472,7 +464,7 @@ class BongoCatAutoLooter:
                 except Exception:
                     pass
 
-            # Physical single click via SendInput
+            # Click via SendInput
             MOUSEEVENTF_LEFTDOWN = 0x0002
             MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -501,6 +493,13 @@ class BongoCatAutoLooter:
             inp_up.type = 0
             inp_up._input.mi.dwFlags = MOUSEEVENTF_LEFTUP
 
+            # 1st click — wake up cursor (fullscreen hides it)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+            time.sleep(0.01)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+            time.sleep(0.1)
+
+            # 2nd click — actual chest click
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
             time.sleep(0.01)
             ctypes.windll.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
