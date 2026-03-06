@@ -350,14 +350,14 @@ class BongoCatAutoLooter:
 
     def click_chest(self, region_x: int, region_y: int):
         """
-        Click the chest by aggressively stealing focus from the
-        fullscreen game, clicking BongoCat, then restoring.
+        Click the chest by stealing focus from the fullscreen app,
+        clicking BongoCat, then restoring.
 
-        Works even in exclusive fullscreen by:
-        1) Simulating Alt key (unlocks SetForegroundWindow restriction)
-        2) Forcing BongoCat to foreground
-        3) Physical mouse click
-        4) Restoring the game
+        1) Persistent un-clip thread (prevents game from re-clipping cursor)
+        2) Alt+Tab to force-minimize the fullscreen app
+        3) Forcing BongoCat to foreground
+        4) SendInput click with retry
+        5) Restoring the previous app
         """
         HWND_TOPMOST    = -1
         HWND_NOTOPMOST  = -2
@@ -366,15 +366,11 @@ class BongoCatAutoLooter:
         SWP_NOACTIVATE  = 0x0010
         SWP_SHOWWINDOW  = 0x0040
         VK_MENU         = 0x12   # Alt key
+        VK_TAB          = 0x09   # Tab key
         KEYEVENTF_KEYUP = 0x0002
-        SW_SHOW         = 5
         SW_RESTORE      = 9
 
         try:
-            win_rect = win32gui.GetWindowRect(self.hwnd)
-            screen_x = win_rect[0] + region_x
-            screen_y = win_rect[1] + region_y
-
             # ── Wait for mouse idle (skip if screen off) ──
             orig = None
             try:
@@ -402,8 +398,10 @@ class BongoCatAutoLooter:
                 pass  # Screen off — skip idle wait
 
             timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"  [{timestamp}] 🖱️  Click at ({screen_x}, {screen_y})",
-                  flush=True)
+
+            win_rect = win32gui.GetWindowRect(self.hwnd)
+            screen_x = win_rect[0] + region_x
+            screen_y = win_rect[1] + region_y
 
             prev_hwnd = None
             try:
@@ -411,41 +409,43 @@ class BongoCatAutoLooter:
             except Exception:
                 pass
 
-            # ══════════════════════════════════════════════
-            #  STEP 1: Break out of exclusive fullscreen
-            # ══════════════════════════════════════════════
-            # Simulate Alt key press — this satisfies Windows'
-            # restriction that only the foreground process can
-            # call SetForegroundWindow. Pressing Alt unlocks it.
-            ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)          # Alt down
-            ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)  # Alt up
+            # ── Persistent un-clip thread ──
+            unclip_stop = threading.Event()
 
-            # Allow our process to set foreground window
-            ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+            def _unclip_loop():
+                while not unclip_stop.is_set():
+                    ctypes.windll.user32.ClipCursor(None)
+                    unclip_stop.wait(0.01)
 
-            # Release cursor clip (game locks cursor in fullscreen)
-            ctypes.windll.user32.ClipCursor(None)
+            unclip_thread = threading.Thread(target=_unclip_loop, daemon=True)
+            unclip_thread.start()
 
-            # ══════════════════════════════════════════════
-            #  STEP 2: Force BongoCat to front
-            # ══════════════════════════════════════════════
-            # Make topmost
+            # Alt key to unlock SetForegroundWindow restriction
+            ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.05)
+
+            ctypes.windll.user32.AllowSetForegroundWindow(-1)
+
+            # Alt+Tab to force-minimize fullscreen app
+            ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(VK_TAB, 0, 0, 0)
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, 0)
+            ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.3)
+
+            # Force BongoCat to front
             ctypes.windll.user32.SetWindowPos(
                 self.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
             )
-
-            # Ensure window is visible and not minimized
             win32gui.ShowWindow(self.hwnd, SW_RESTORE)
-
-            # Bring to top of Z-order
             win32gui.BringWindowToTop(self.hwnd)
 
-            # Set as foreground (should work now after Alt key simulation)
             try:
                 win32gui.SetForegroundWindow(self.hwnd)
             except Exception:
-                # Fallback: attach to foreground thread's input queue
                 try:
                     fg = win32gui.GetForegroundWindow()
                     fg_thread = ctypes.windll.user32.GetWindowThreadProcessId(fg, None)
@@ -456,50 +456,79 @@ class BongoCatAutoLooter:
                 except Exception:
                     pass
 
-            time.sleep(0.2)  # Let BongoCat fully appear
+            time.sleep(0.5)  # Wait for BongoCat to fully appear
 
-            # Release clip again (game may have re-clipped)
-            ctypes.windll.user32.ClipCursor(None)
+            # Move cursor with retries
+            for _ in range(3):
+                try:
+                    win32api.SetCursorPos((screen_x, screen_y))
+                except Exception:
+                    pass
+                time.sleep(0.02)
+                try:
+                    cur = win32api.GetCursorPos()
+                    if abs(cur[0] - screen_x) <= 2 and abs(cur[1] - screen_y) <= 2:
+                        break
+                except Exception:
+                    pass
 
-            # ══════════════════════════════════════════════
-            #  STEP 3: Physical click on the chest
-            # ══════════════════════════════════════════════
-            try:
-                win32api.SetCursorPos((screen_x, screen_y))
-            except Exception:
-                pass
+            # Physical single click via SendInput
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
 
-            time.sleep(0.02)
-            ctypes.windll.user32.ClipCursor(None)
+            class MOUSEINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("dx", ctypes.wintypes.LONG),
+                    ("dy", ctypes.wintypes.LONG),
+                    ("mouseData", ctypes.wintypes.DWORD),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("time", ctypes.wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+                ]
 
-            # A single click is enough to loot
-            win32api.mouse_event(0x0002, 0, 0, 0, 0)  # LEFTDOWN
+            class INPUT(ctypes.Structure):
+                class _INPUT(ctypes.Union):
+                    _fields_ = [("mi", MOUSEINPUT)]
+                _fields_ = [
+                    ("type", ctypes.wintypes.DWORD),
+                    ("_input", _INPUT),
+                ]
+
+            inp_down = INPUT()
+            inp_down.type = 0  # INPUT_MOUSE
+            inp_down._input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+            inp_up = INPUT()
+            inp_up.type = 0
+            inp_up._input.mi.dwFlags = MOUSEEVENTF_LEFTUP
+
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+            time.sleep(0.01)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
             time.sleep(0.03)
-            win32api.mouse_event(0x0004, 0, 0, 0, 0)  # LEFTUP
-            time.sleep(0.03)
+
+            print(f"  [{timestamp}] 🖱️  Click at ({screen_x}, {screen_y})",
+                  flush=True)
 
             # ══════════════════════════════════════════════
-            #  STEP 4: Restore everything
+            #  RESTORE everything
             # ══════════════════════════════════════════════
-            # Remove TOPMOST flag
+            unclip_stop.set()
+
             ctypes.windll.user32.SetWindowPos(
                 self.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
             )
 
-            # Restore cursor position
             if orig:
                 try:
                     win32api.SetCursorPos(orig)
                 except Exception:
                     pass
 
-            # Give focus back to the game
             ctypes.windll.user32.ClipCursor(None)
             if prev_hwnd and win32gui.IsWindow(prev_hwnd):
                 time.sleep(0.1)
                 try:
-                    # Simulate Alt again to allow setting foreground
                     ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)
                     ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
                     win32gui.SetForegroundWindow(prev_hwnd)
@@ -507,7 +536,10 @@ class BongoCatAutoLooter:
                     pass
 
         except Exception as e:
-            # Always try to clean up TOPMOST
+            try:
+                unclip_stop.set()
+            except Exception:
+                pass
             try:
                 ctypes.windll.user32.SetWindowPos(
                     self.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
@@ -519,9 +551,15 @@ class BongoCatAutoLooter:
 
     def run(self):
         alive_status = "ON" if self.keep_alive else "OFF"
-        print(f"  ⌨️  F6=Pause | F7=Stop | F8=KeepAlive({alive_status})")
-        print(f"  📋 Interval={CHECK_INTERVAL}s  Confidence≥{CONFIDENCE_THRESHOLD}  Cooldown={POST_CLICK_COOLDOWN}s")
-        print("-" * 50)
+        print()
+        print(f"  ⌨️  F6 = Pause/Resume")
+        print(f"  ⌨️  F7 = Stop")
+        print(f"  ⌨️  F8 = Keep Alive ({alive_status})")
+        print()
+        print(f"  📋 Check every {CHECK_INTERVAL}s | "
+              f"Confidence ≥ {CONFIDENCE_THRESHOLD} | "
+              f"Cooldown {POST_CLICK_COOLDOWN}s")
+        print("─" * 50)
         print(f"  👀 Scanning...", flush=True)
 
         # Apply keep-alive state (prevents display + system sleep)
@@ -582,20 +620,22 @@ class BongoCatAutoLooter:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
             hrs, mins = divmod(mins, 60)
-            print("-" * 50)
-            print(f"  📊 Done — {self.loot_count} chests in {hrs:02d}:{mins:02d}:{secs:02d}")
+            print("─" * 50)
+            print(f"  📊 Session: {self.loot_count} chests in {hrs:02d}:{mins:02d}:{secs:02d}")
+            print()
             input("  Press Enter to exit...")
 
 
 def main():
-    disable_quick_edit()  # Prevent console freezes from cursor movement
     sys.stdout.flush()
     sys.stderr.flush()
 
     template_path = resource_path("chest_template.png")
 
-    print("\n  🐱 Bongo Cat Auto-Loot")
-    print("=" * 50)
+    print()
+    print("═" * 50)
+    print("  🐱 Bongo Cat Auto-Loot")
+    print("═" * 50)
 
     # ── Check if Bongo Cat runs as admin; elevate only if needed ─
     import win32process
