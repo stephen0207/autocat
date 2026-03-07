@@ -19,19 +19,18 @@ Controls:
 import sys
 import os
 
-# Force unbuffered output so the terminal updates in real-time
-os.environ['PYTHONUNBUFFERED'] = '1'
-sys.stdout.reconfigure(line_buffering=True)
+# Force fully unbuffered output so the terminal updates in real-time.
+# os.environ['PYTHONUNBUFFERED'] only works if set BEFORE the interpreter starts,
+# so we use write_through=True which bypasses Python's internal text buffer.
+sys.stdout.reconfigure(write_through=True)
+sys.stderr.reconfigure(write_through=True)
 
 import cv2
 import numpy as np
 import pyautogui
 
-
 import time
 import threading
-import os
-import sys
 import ctypes
 import ctypes.wintypes
 from datetime import datetime
@@ -113,7 +112,7 @@ def elevate():
     Called only when Bongo Cat is detected as running as admin.
     """
     if not is_admin():
-        print("  🔒 Elevating to admin...")
+        print("  🔒 Elevating to admin...", flush=True)
         if getattr(sys, 'frozen', False):
             script = sys.executable
             args = None
@@ -145,9 +144,9 @@ def disable_quick_edit():
         # Keep ENABLE_EXTENDED_FLAGS (0x0080) so the change takes effect
         new_mode = (mode.value & ~0x0040 & ~0x0020) | 0x0080
         kernel32.SetConsoleMode(h_stdin, new_mode)
-        print("  ✅ Quick Edit disabled")
+        print("  ✅ Quick Edit disabled", flush=True)
     except Exception as e:
-        print(f"  ⚠️  Could not disable Quick Edit: {e}")
+        print(f"  ⚠️  Could not disable Quick Edit: {e}", flush=True)
 
 
 # ═══════════════════════════════════════════════════════
@@ -193,16 +192,16 @@ class BongoCatAutoLooter:
 
     def _load_template(self, template_path: str):
         if not os.path.exists(template_path):
-            print(f"  ❌ Template not found: {template_path}")
+            print(f"  ❌ Template not found: {template_path}", flush=True)
             sys.exit(1)
 
         self.template = cv2.imread(template_path, cv2.IMREAD_COLOR)
         if self.template is None:
-            print(f"  ❌ Failed to load: {template_path}")
+            print(f"  ❌ Failed to load: {template_path}", flush=True)
             sys.exit(1)
 
         self.template_h, self.template_w = self.template.shape[:2]
-        print(f"  ✅ Template loaded ({self.template_w}x{self.template_h}px)")
+        print(f"  ✅ Template loaded ({self.template_w}x{self.template_h}px)", flush=True)
 
     def _find_window(self):
         def enum_cb(hwnd, results):
@@ -215,11 +214,11 @@ class BongoCatAutoLooter:
         win32gui.EnumWindows(enum_cb, results)
 
         if not results:
-            print(f"  ❌ '{WINDOW_TITLE}' window not found. Is Bongo Cat running?")
+            print(f"  ❌ '{WINDOW_TITLE}' window not found. Is Bongo Cat running?", flush=True)
             sys.exit(1)
 
         self.hwnd = results[0][0]
-        print(f"  🪟 Window: \"{results[0][1]}\"")
+        print(f"  🪟 Window: \"{results[0][1]}\"", flush=True)
 
     def _check_hotkeys(self):
         """Poll physical key state — no console input interaction."""
@@ -242,18 +241,18 @@ class BongoCatAutoLooter:
     def _toggle_pause(self):
         self.paused = not self.paused
         status = "⏸️  PAUSED" if self.paused else "▶️  RESUMED"
-        print(f"  {status}")
+        print(f"  {status}", flush=True)
 
     def _stop(self):
         self.running = False
         self._stop_event.set()  # Wake up any sleeping wait immediately
-        print(f"\n🛑 Stopping...")
+        print(f"\n🛑 Stopping...", flush=True)
 
     def _toggle_keep_alive(self):
         self.keep_alive = not self.keep_alive
         self._apply_keep_alive()
         status = "🔆 ON" if self.keep_alive else "🌙 OFF"
-        print(f"  Keep Alive: {status}")
+        print(f"  Keep Alive: {status}", flush=True)
 
     def _apply_keep_alive(self):
         """Apply or remove the keep-alive execution state."""
@@ -288,7 +287,7 @@ class BongoCatAutoLooter:
         """
         try:
             if not win32gui.IsWindow(self.hwnd):
-                print("  ⚠️  Window lost! Re-finding...")
+                print("  ⚠️  Window lost! Re-finding...", flush=True)
                 self._find_window()
 
             rect = win32gui.GetWindowRect(self.hwnd)
@@ -550,15 +549,15 @@ class BongoCatAutoLooter:
 
     def run(self):
         alive_status = "ON" if self.keep_alive else "OFF"
-        print()
-        print(f"  ⌨️  F6 = Pause/Resume")
-        print(f"  ⌨️  F7 = Stop")
-        print(f"  ⌨️  F8 = Keep Alive ({alive_status})")
-        print()
+        print(flush=True)
+        print(f"  ⌨️  F6 = Pause/Resume", flush=True)
+        print(f"  ⌨️  F7 = Stop", flush=True)
+        print(f"  ⌨️  F8 = Keep Alive ({alive_status})", flush=True)
+        print(flush=True)
         print(f"  📋 Check every {CHECK_INTERVAL}s | "
               f"Confidence ≥ {CONFIDENCE_THRESHOLD} | "
-              f"Cooldown {POST_CLICK_COOLDOWN}s")
-        print("─" * 50)
+              f"Cooldown {POST_CLICK_COOLDOWN}s", flush=True)
+        print("─" * 50, flush=True)
         print(f"  👀 Scanning...", flush=True)
 
         # Apply keep-alive state (prevents display + system sleep)
@@ -619,22 +618,31 @@ class BongoCatAutoLooter:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
             hrs, mins = divmod(mins, 60)
-            print("─" * 50)
-            print(f"  📊 Session: {self.loot_count} chests in {hrs:02d}:{mins:02d}:{secs:02d}")
-            print()
+            print("─" * 50, flush=True)
+            print(f"  📊 Session: {self.loot_count} chests in {hrs:02d}:{mins:02d}:{secs:02d}", flush=True)
+            print(flush=True)
+            # Clear any stale buffered input before waiting for user
+            try:
+                import msvcrt
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+            except Exception:
+                pass
             input("  Press Enter to exit...")
 
 
 def main():
+    # stdout/stderr are already write-through, but flush once at startup
+    # in case anything was buffered before reconfigure
     sys.stdout.flush()
     sys.stderr.flush()
 
     template_path = resource_path("chest_template.png")
 
     print()
-    print("═" * 50)
-    print("  🐱 Bongo Cat Auto-Loot")
-    print("═" * 50)
+    print("═" * 50, flush=True)
+    print("  🐱 Bongo Cat Auto-Loot", flush=True)
+    print("═" * 50, flush=True)
 
     # ── Check if Bongo Cat runs as admin; elevate only if needed ─
     import win32process
@@ -650,7 +658,7 @@ def main():
             if is_process_elevated(pid) and not is_admin():
                 elevate()  # re-launch with admin and exit current process
         except Exception as e:
-            print(f"  ⚠️  Could not check Bongo Cat elevation: {e}")
+            print(f"  ⚠️  Could not check Bongo Cat elevation: {e}", flush=True)
     # ────────────────────────────────────────────────────────────
 
     looter = BongoCatAutoLooter(template_path)
