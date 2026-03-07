@@ -637,6 +637,9 @@ def main():
     sys.stdout.flush()
     sys.stderr.flush()
 
+    # Prevent mouse clicks on the console from freezing output
+    disable_quick_edit()
+
     template_path = resource_path("chest_template.png")
 
     print()
